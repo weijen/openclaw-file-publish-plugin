@@ -8,6 +8,7 @@ const {
   sanitiseFilename,
   safeResolve,
   buildBlobName,
+  validateMagicBytes,
 } = require("./lib/file");
 
 function normalizeOptionalValue(value) {
@@ -91,6 +92,9 @@ function register(api) {
       "Upload a locally-generated file to public storage and deliver it to the current chat. " +
       "Use AFTER you have produced a file (e.g. report.docx, sales.xlsx, slides.pptx, summary.pdf) " +
       "in your agent workspace via shell tools (pandoc, libreoffice, wkhtmltopdf, etc.). " +
+      "Files with binary extensions (.docx, .xlsx, .pptx, .pdf, .png, .jpg, .zip, ...) are rejected " +
+      "if their content is not actually that format — you cannot just write markdown to a `.docx` " +
+      "file and publish it; you must run the converter first. " +
       "On Telegram the user receives the file inline; on LINE/WhatsApp they receive a clickable HTTPS link. " +
       "NEVER publish private workspace files (memory, credentials, identity files).",
     parameters: {
@@ -156,6 +160,28 @@ function register(api) {
       // ---- Read file & upload to blob -------------------------------------
       const buffer = await fs.readFile(resolved.realPath);
       const contentType = contentTypeForPath(resolved.realPath);
+
+      // Reject files whose content does not match the magic bytes implied by
+      // their extension. This catches the common bug where the agent writes
+      // markdown directly into a `.docx` (or `.pdf`, etc.) instead of running
+      // pandoc/libreoffice on it. Without this guard the upload succeeds but
+      // the file is broken on the user's side.
+      const magicError = validateMagicBytes(resolved.realPath, buffer.slice(0, 16));
+      if (magicError) {
+        auditLog(api, {
+          channel,
+          to: toolCtx?.deliveryContext?.to || "",
+          filename: displayName,
+          size: buffer.length,
+          status: "error",
+          reason: "bad_magic",
+          error: magicError,
+        });
+        return {
+          content: [{ type: "text", text: `publish_file error: ${magicError}` }],
+          details: { status: "error", reason: "bad_magic", error: magicError },
+        };
+      }
 
       const storageKey = resolveStorageKey();
       if (!cfg.mediaStorageAccount || !storageKey) {
@@ -287,6 +313,7 @@ module.exports._internals = {
   sanitiseFilename,
   safeResolve,
   buildBlobName,
+  validateMagicBytes,
   normalizeOptionalValue,
   normalizeChannel,
   expandHomePath,

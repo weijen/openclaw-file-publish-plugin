@@ -9,6 +9,7 @@ const {
   sanitiseFilename,
   safeResolve,
   buildBlobName,
+  validateMagicBytes,
 } = require("../lib/file");
 
 describe("contentTypeForPath", () => {
@@ -120,5 +121,68 @@ describe("safeResolve", () => {
     const result = await safeResolve(f, root, fs);
     assert.equal(result.size, 11);
     assert.equal(path.basename(result.realPath), "ok.pdf");
+  });
+});
+
+describe("validateMagicBytes", () => {
+  const ZIP_HEAD = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+  const PDF_HEAD = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e]); // "%PDF-1."
+  const TEXT_HEAD = Buffer.from("# Hello\n", "utf8");
+
+  it("returns null for unknown extensions (no magic to check)", () => {
+    assert.equal(validateMagicBytes("/x/notes.txt", TEXT_HEAD), null);
+    assert.equal(validateMagicBytes("/x/notes.md", TEXT_HEAD), null);
+    assert.equal(validateMagicBytes("/x/data.csv", TEXT_HEAD), null);
+    assert.equal(validateMagicBytes("/x/page.html", TEXT_HEAD), null);
+    assert.equal(validateMagicBytes("/x/blob.bin", TEXT_HEAD), null);
+  });
+
+  it("accepts ZIP-based Office formats with correct magic", () => {
+    assert.equal(validateMagicBytes("/x/r.docx", ZIP_HEAD), null);
+    assert.equal(validateMagicBytes("/x/s.xlsx", ZIP_HEAD), null);
+    assert.equal(validateMagicBytes("/x/p.pptx", ZIP_HEAD), null);
+    assert.equal(validateMagicBytes("/x/o.odt", ZIP_HEAD), null);
+    assert.equal(validateMagicBytes("/x/z.zip", ZIP_HEAD), null);
+  });
+
+  it("accepts a PDF with %PDF- header", () => {
+    assert.equal(validateMagicBytes("/x/r.pdf", PDF_HEAD), null);
+  });
+
+  it("rejects markdown text written to a .docx", () => {
+    const err = validateMagicBytes("/x/r.docx", TEXT_HEAD);
+    assert.ok(err);
+    assert.match(err, /\.docx/);
+    assert.match(err, /pandoc|libreoffice|wkhtmltopdf/);
+  });
+
+  it("rejects markdown text written to a .pdf", () => {
+    const err = validateMagicBytes("/x/r.pdf", TEXT_HEAD);
+    assert.ok(err);
+    assert.match(err, /\.pdf/);
+  });
+
+  it("rejects a too-small file", () => {
+    const tiny = Buffer.from([0x50, 0x4b]); // first 2 bytes of ZIP, but not enough
+    const err = validateMagicBytes("/x/r.docx", tiny);
+    assert.ok(err);
+    assert.match(err, /too small/);
+  });
+
+  it("rejects an empty buffer", () => {
+    const err = validateMagicBytes("/x/r.docx", Buffer.alloc(0));
+    assert.ok(err);
+    assert.match(err, /too small/);
+  });
+
+  it("rejects null head buffer", () => {
+    const err = validateMagicBytes("/x/r.docx", null);
+    assert.ok(err);
+    assert.match(err, /too small/);
+  });
+
+  it("is case-insensitive on extension", () => {
+    assert.equal(validateMagicBytes("/x/r.DOCX", ZIP_HEAD), null);
+    assert.equal(validateMagicBytes("/x/r.PDF", PDF_HEAD), null);
   });
 });
