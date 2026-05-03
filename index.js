@@ -9,6 +9,7 @@ const {
   safeResolve,
   buildBlobName,
   validateMagicBytes,
+  validateOoxmlStructure,
 } = require("./lib/file");
 
 function normalizeOptionalValue(value) {
@@ -94,7 +95,9 @@ function register(api) {
       "in your agent workspace via shell tools (pandoc, libreoffice, wkhtmltopdf, etc.). " +
       "Files with binary extensions (.docx, .xlsx, .pptx, .pdf, .png, .jpg, .zip, ...) are rejected " +
       "if their content is not actually that format — you cannot just write markdown to a `.docx` " +
-      "file and publish it; you must run the converter first. " +
+      "file and publish it; you must run the converter first. Office documents (.docx/.xlsx/.pptx) " +
+      "must also be complete OOXML packages produced by a real converter; hand-rolled minimal " +
+      "ZIPs missing theme/slideMasters/slideLayouts will be rejected. " +
       "On Telegram the user receives the file inline; on LINE/WhatsApp they receive a clickable HTTPS link. " +
       "NEVER publish private workspace files (memory, credentials, identity files).",
     parameters: {
@@ -180,6 +183,29 @@ function register(api) {
         return {
           content: [{ type: "text", text: `publish_file error: ${magicError}` }],
           details: { status: "error", reason: "bad_magic", error: magicError },
+        };
+      }
+
+      // Deeper check for OOXML (.docx / .xlsx / .pptx): the file is a valid
+      // ZIP, but is it a valid OOXML package? Catches the case where the
+      // agent assembles a minimal ZIP with python's zipfile module
+      // containing only the body XML and missing theme/slideMasters/etc.
+      // PowerPoint in particular refuses to open a pptx without theme,
+      // slideMasters, and slideLayouts.
+      const ooxmlError = validateOoxmlStructure(resolved.realPath, buffer);
+      if (ooxmlError) {
+        auditLog(api, {
+          channel,
+          to: toolCtx?.deliveryContext?.to || "",
+          filename: displayName,
+          size: buffer.length,
+          status: "error",
+          reason: "bad_ooxml",
+          error: ooxmlError,
+        });
+        return {
+          content: [{ type: "text", text: `publish_file error: ${ooxmlError}` }],
+          details: { status: "error", reason: "bad_ooxml", error: ooxmlError },
         };
       }
 
@@ -314,6 +340,7 @@ module.exports._internals = {
   safeResolve,
   buildBlobName,
   validateMagicBytes,
+  validateOoxmlStructure,
   normalizeOptionalValue,
   normalizeChannel,
   expandHomePath,

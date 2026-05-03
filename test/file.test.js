@@ -10,6 +10,8 @@ const {
   safeResolve,
   buildBlobName,
   validateMagicBytes,
+  validateOoxmlStructure,
+  listZipEntries,
 } = require("../lib/file");
 
 describe("contentTypeForPath", () => {
@@ -184,5 +186,193 @@ describe("validateMagicBytes", () => {
   it("is case-insensitive on extension", () => {
     assert.equal(validateMagicBytes("/x/r.DOCX", ZIP_HEAD), null);
     assert.equal(validateMagicBytes("/x/r.PDF", PDF_HEAD), null);
+  });
+});
+
+// ----- Helpers for ZIP / OOXML tests --------------------------------------
+
+const zlib = require("node:zlib");
+
+/**
+ * Build an in-memory ZIP archive (STORED, no compression) containing the
+ * given entries. Each entry is { name: string, data: Buffer|string }.
+ * Just enough for OOXML structural tests; not a general ZIP writer.
+ */
+function buildZip(entries) {
+  const localParts = [];
+  const cdParts = [];
+  let offset = 0;
+
+  for (const e of entries) {
+    const name = Buffer.from(e.name, "utf8");
+    const data = Buffer.isBuffer(e.data) ? e.data : Buffer.from(e.data, "utf8");
+    const crc = zlib.crc32 ? zlib.crc32(data) : 0; // node 20+; tests don't validate CRC
+    const local = Buffer.alloc(30 + name.length + data.length);
+    local.writeUInt32LE(0x04034b50, 0); // local file header sig
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(0, 6); // flags
+    local.writeUInt16LE(0, 8); // method = stored
+    local.writeUInt16LE(0, 10); // mtime
+    local.writeUInt16LE(0, 12); // mdate
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18); // compressed size
+    local.writeUInt32LE(data.length, 22); // uncompressed size
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28); // extra len
+    name.copy(local, 30);
+    data.copy(local, 30 + name.length);
+    localParts.push(local);
+
+    const cd = Buffer.alloc(46 + name.length);
+    cd.writeUInt32LE(0x02014b50, 0); // central dir sig
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(0, 8);
+    cd.writeUInt16LE(0, 10);
+    cd.writeUInt16LE(0, 12);
+    cd.writeUInt16LE(0, 14);
+    cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(data.length, 20);
+    cd.writeUInt32LE(data.length, 24);
+    cd.writeUInt16LE(name.length, 28);
+    cd.writeUInt16LE(0, 30);
+    cd.writeUInt16LE(0, 32);
+    cd.writeUInt16LE(0, 34);
+    cd.writeUInt16LE(0, 36);
+    cd.writeUInt32LE(0, 38);
+    cd.writeUInt32LE(offset, 42);
+    name.copy(cd, 46);
+    cdParts.push(cd);
+
+    offset += local.length;
+  }
+
+  const cdBuf = Buffer.concat(cdParts);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([Buffer.concat(localParts), cdBuf, eocd]);
+}
+
+describe("listZipEntries", () => {
+  it("returns null for non-ZIP buffer", () => {
+    assert.equal(listZipEntries(Buffer.from("not a zip", "utf8")), null);
+  });
+
+  it("returns null for null/empty input", () => {
+    assert.equal(listZipEntries(null), null);
+    assert.equal(listZipEntries(Buffer.alloc(0)), null);
+  });
+
+  it("returns the file names from a valid ZIP", () => {
+    const zip = buildZip([
+      { name: "a.txt", data: "hello" },
+      { name: "dir/b.xml", data: "<x/>" },
+    ]);
+    const names = listZipEntries(zip);
+    assert.deepEqual(names, ["a.txt", "dir/b.xml"]);
+  });
+
+  it("scans backward to find EOCD even with trailing bytes after the archive", () => {
+    const zip = buildZip([{ name: "x.txt", data: "y" }]);
+    const padded = Buffer.concat([zip, Buffer.from("xxxxxxxxxx")]);
+    // Both the unpadded archive and one with arbitrary trailing junk parse
+    // because the parser scans backward from EOF for the EOCD signature.
+    assert.deepEqual(listZipEntries(zip), ["x.txt"]);
+    assert.deepEqual(listZipEntries(padded), ["x.txt"]);
+  });
+});
+
+describe("validateOoxmlStructure", () => {
+  it("returns null for non-OOXML extensions", () => {
+    assert.equal(validateOoxmlStructure("/x/r.pdf", Buffer.from("%PDF-1.4")), null);
+    assert.equal(validateOoxmlStructure("/x/r.txt", Buffer.from("hello")), null);
+    assert.equal(validateOoxmlStructure("/x/r.zip", buildZip([{ name: "a", data: "b" }])), null);
+  });
+
+  it("rejects a .docx that is not a ZIP at all", () => {
+    const err = validateOoxmlStructure("/x/r.docx", Buffer.from("hello"));
+    assert.ok(err);
+    assert.match(err, /not a valid ZIP/);
+  });
+
+  it("rejects a .docx ZIP missing word/document.xml", () => {
+    const zip = buildZip([
+      { name: "[Content_Types].xml", data: "<x/>" },
+      { name: "_rels/.rels", data: "<x/>" },
+    ]);
+    const err = validateOoxmlStructure("/x/r.docx", zip);
+    assert.ok(err);
+    assert.match(err, /missing required OOXML parts/);
+    assert.match(err, /word\/document\.xml/);
+  });
+
+  it("accepts a .docx ZIP with [Content_Types] and word/document.xml", () => {
+    const zip = buildZip([
+      { name: "[Content_Types].xml", data: "<x/>" },
+      { name: "word/document.xml", data: "<doc/>" },
+    ]);
+    assert.equal(validateOoxmlStructure("/x/r.docx", zip), null);
+  });
+
+  it("rejects an .xlsx missing xl/workbook.xml", () => {
+    const zip = buildZip([{ name: "[Content_Types].xml", data: "<x/>" }]);
+    const err = validateOoxmlStructure("/x/r.xlsx", zip);
+    assert.ok(err);
+    assert.match(err, /xl\/workbook\.xml/);
+  });
+
+  it("accepts an .xlsx with required parts", () => {
+    const zip = buildZip([
+      { name: "[Content_Types].xml", data: "<x/>" },
+      { name: "xl/workbook.xml", data: "<wb/>" },
+    ]);
+    assert.equal(validateOoxmlStructure("/x/r.xlsx", zip), null);
+  });
+
+  it("rejects a hand-rolled .pptx missing theme/slideMasters/slideLayouts (the real bug)", () => {
+    // Mirrors the actual broken file the agent produced: only presentation +
+    // slides, no theme/master/layout.
+    const zip = buildZip([
+      { name: "[Content_Types].xml", data: "<x/>" },
+      { name: "_rels/.rels", data: "<x/>" },
+      { name: "ppt/presentation.xml", data: "<x/>" },
+      { name: "ppt/slides/slide1.xml", data: "<x/>" },
+      { name: "ppt/slides/slide2.xml", data: "<x/>" },
+    ]);
+    const err = validateOoxmlStructure("/x/r.pptx", zip);
+    assert.ok(err);
+    assert.match(err, /missing required OOXML parts/);
+    assert.match(err, /ppt\/theme\/theme/);
+    assert.match(err, /ppt\/slideMasters\/slideMaster/);
+    assert.match(err, /ppt\/slideLayouts\/slideLayout/);
+    assert.match(err, /pandoc|libreoffice/);
+  });
+
+  it("accepts a complete .pptx package", () => {
+    const zip = buildZip([
+      { name: "[Content_Types].xml", data: "<x/>" },
+      { name: "ppt/presentation.xml", data: "<x/>" },
+      { name: "ppt/theme/theme1.xml", data: "<x/>" },
+      { name: "ppt/slideMasters/slideMaster1.xml", data: "<x/>" },
+      { name: "ppt/slideLayouts/slideLayout1.xml", data: "<x/>" },
+      { name: "ppt/slides/slide1.xml", data: "<x/>" },
+    ]);
+    assert.equal(validateOoxmlStructure("/x/r.pptx", zip), null);
+  });
+
+  it("is case-insensitive on extension", () => {
+    const zip = buildZip([
+      { name: "[Content_Types].xml", data: "<x/>" },
+      { name: "word/document.xml", data: "<x/>" },
+    ]);
+    assert.equal(validateOoxmlStructure("/x/r.DOCX", zip), null);
   });
 });
