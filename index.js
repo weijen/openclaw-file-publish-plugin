@@ -33,17 +33,27 @@ function expandHomePath(p) {
 
 /**
  * Emit one structured JSON line per call so downstream log shippers
- * (journald → Azure Monitor Agent → Log Analytics) can index by field.
+ * (Application Insights `setAutoCollectConsole` → `traces` table on Log
+ * Analytics) can index by field.
+ *
+ * Always uses `console.log` because Application Insights' auto-instrumentation
+ * only captures stdout/stderr, NOT OpenClaw's internal logger which writes
+ * to a file. The `api.logger.info` call is best-effort for local debugging
+ * via the gateway file log.
  *
  * Intentionally redacts file contents, captions, prompts, and storage keys.
  */
 function auditLog(api, payload) {
   const line = JSON.stringify({ event: "file_publish", ...payload });
-  if (api.logger?.info) {
-    api.logger.info(line);
-  } else {
-    // Fallback to stdout — captured by journald on the VM.
-    console.log(line);
+  // Stdout — captured by App Insights and visible in `journalctl --user -u openclaw-gateway`.
+  console.log(line);
+  // Best-effort: also surface in OpenClaw's structured file log.
+  if (api.logger && typeof api.logger.info === "function") {
+    try {
+      api.logger.info(line);
+    } catch (_err) {
+      // ignore logger failures — stdout is the source of truth
+    }
   }
 }
 
@@ -280,4 +290,5 @@ module.exports._internals = {
   normalizeOptionalValue,
   normalizeChannel,
   expandHomePath,
+  auditLog,
 };

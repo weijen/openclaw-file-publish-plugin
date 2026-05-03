@@ -1,6 +1,6 @@
 {
   "name": "openclaw-file-publish-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Publish locally generated files (.docx/.xlsx/.pptx/.pdf/...) to Azure Blob Storage and deliver to chat channels.",
   "main": "index.js",
