@@ -1,0 +1,67 @@
+{
+  "id": "file-publish",
+  "name": "File Publish",
+  "version": "0.1.0",
+  "description": "Upload locally generated files to Azure Blob Storage and deliver them to the active chat channel (Telegram inline + URL; LINE/WhatsApp via URL).",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mediaStorageAccount": {
+        "type": "string",
+        "description": "Azure Blob Storage account name for public file hosting"
+      },
+      "mediaStorageKey": {
+        "type": "string",
+        "description": "Azure Blob Storage shared key (or __KEYVAULT__ placeholder)"
+      },
+      "documentsContainer": {
+        "type": "string",
+        "default": "documents",
+        "description": "Blob container name for uploaded files"
+      },
+      "workspaceRoot": {
+        "type": "string",
+        "description": "Absolute path the agent is allowed to publish files from. Files outside this root are rejected."
+      },
+      "maxSizeMB": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 50,
+        "description": "Maximum file size to publish (Telegram sendDocument cap is 50 MB)"
+      },
+      "telegramMaxSizeMB": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 50,
+        "description": "Maximum file size to send inline via Telegram Bot API"
+      }
+    }
+  },
+  "uiHints": {
+    "mediaStorageAccount": {
+      "label": "Blob Storage Account",
+      "placeholder": "ocfamilymediaXXXXX"
+    },
+    "mediaStorageKey": {
+      "label": "Blob Storage Key",
+      "sensitive": true
+    },
+    "documentsContainer": {
+      "label": "Blob Container Name",
+      "placeholder": "documents"
+    },
+    "workspaceRoot": {
+      "label": "Allowed Workspace Root",
+      "placeholder": "/home/<user>/.openclaw/workspace"
+    },
+    "maxSizeMB": {
+      "label": "Max Upload Size (MB)"
+    },
+    "telegramMaxSizeMB": {
+      "label": "Max Telegram Inline Size (MB)"
+    }
+  }
+}

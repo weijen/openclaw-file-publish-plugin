@@ -1,0 +1,21 @@
+{
+  "plugins": {
+    "allow": ["file-publish"],
+    "entries": {
+      "file-publish": {
+        "enabled": true,
+        "config": {
+          "mediaStorageAccount": "<storage-account>",
+          "mediaStorageKey": "<storage-key>",
+          "documentsContainer": "documents",
+          "workspaceRoot": "/home/<user>/.openclaw/workspace",
+          "maxSizeMB": 50,
+          "telegramMaxSizeMB": 50
+        }
+      }
+    },
+    "load": {
+      "paths": ["/absolute/path/to/openclaw-file-publish-plugin"]
+    }
+  }
+}
