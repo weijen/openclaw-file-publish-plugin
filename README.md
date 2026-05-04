@@ -65,7 +65,9 @@ example.
 
 ```jsonc
 {
-  "content": [{ "type": "text", "text": "📎 report.pdf\nhttps://...\n" }],
+  // On Telegram (delivered via sendDocument): "✅ report.pdf"
+  // On LINE / WhatsApp (URL-only delivery):    "📎 report.pdf\nhttps://..."
+  "content": [{ "type": "text", "text": "..." }],
   "details": {
     "status": "ok",
     "deliveryMode": "telegram-direct" | "url",
@@ -75,6 +77,11 @@ example.
   }
 }
 ```
+
+The tool result text intentionally **omits** the public URL on Telegram so the
+agent does not echo a redundant link next to a file the user already received
+inline. The `details.publicUrl` field always carries the URL for audit / log
+purposes regardless of channel.
 
 ### Errors
 

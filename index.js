@@ -98,7 +98,8 @@ function register(api) {
       "file and publish it; you must run the converter first. Office documents (.docx/.xlsx/.pptx) " +
       "must also be complete OOXML packages produced by a real converter; hand-rolled minimal " +
       "ZIPs missing theme/slideMasters/slideLayouts will be rejected. " +
-      "On Telegram the user receives the file inline; on LINE/WhatsApp they receive a clickable HTTPS link. " +
+      "On Telegram the user receives the file natively (no URL is returned in the tool result — just confirm delivery). " +
+      "On LINE/WhatsApp the tool result includes a clickable HTTPS link that you must include verbatim in your reply. " +
       "NEVER publish private workspace files (memory, credentials, identity files).",
     parameters: {
       type: "object",
@@ -291,9 +292,18 @@ function register(api) {
         status: "ok",
       });
 
-      const text = caption
-        ? `${caption}\n📎 ${displayName}\n${publicUrl}`
-        : `📎 ${displayName}\n${publicUrl}`;
+      // On Telegram, the file was already delivered natively as a document, so
+      // the user does NOT need the public URL echoed back as a separate text
+      // bubble (it just generates an extra message + a redundant inline preview).
+      // On LINE / WhatsApp the URL IS the delivery, so include it.
+      let text;
+      if (deliveryMode === "telegram-direct") {
+        text = caption ? `${caption}\n✅ ${displayName}` : `✅ ${displayName}`;
+      } else {
+        text = caption
+          ? `${caption}\n📎 ${displayName}\n${publicUrl}`
+          : `📎 ${displayName}\n${publicUrl}`;
+      }
 
       return {
         content: [{ type: "text", text }],
@@ -315,8 +325,9 @@ function register(api) {
         "You have a publish_file tool. When you have generated a file (e.g. via pandoc, libreoffice, wkhtmltopdf) " +
         "and want to deliver it to the user, call publish_file({ path: \"<absolute path inside your workspace>\", " +
         "displayName: \"<name>\", caption: \"<one line>\" }). " +
-        "On Telegram the user receives the file inline AND a URL. On LINE/WhatsApp they receive a clickable HTTPS URL. " +
-        "If the result includes a URL, include EXACTLY that URL in your reply. NEVER fabricate URLs. " +
+        "On Telegram the file is delivered natively (sendDocument) and the tool result text will NOT contain a URL " +
+        "— just reply with a short confirmation, do NOT mention or fabricate a URL. " +
+        "On LINE/WhatsApp the tool result text contains a clickable HTTPS URL — include EXACTLY that URL in your reply, never fabricate one. " +
         "NEVER call publish_file on private workspace files such as memory, credentials, or identity files — " +
         "only on artifacts you generated for the user in this turn.",
     }),
