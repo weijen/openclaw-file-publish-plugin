@@ -1,8 +1,14 @@
 {
   "id": "file-publish",
   "name": "File Publish",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Upload locally generated files to Azure Blob Storage and deliver them to the active chat channel (Telegram inline + URL; LINE/WhatsApp via URL).",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["publish_file"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
